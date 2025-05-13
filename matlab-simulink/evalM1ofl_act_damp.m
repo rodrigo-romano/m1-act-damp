@@ -44,11 +44,8 @@ hnichols.PhaseMatchingValue = -180;
 %% Load M1 controller and interface model parameters
 %%
 
-% load('controls_5pt1e_z30_dev','m1sys','fem')
-% load('controls_5pt1f_z30_iTT_oad','m1sys','fem')
-% load('../versions/controls_5pt1f_z30_llTT_oad','m1sys','fem')
-load('../../gmt-ims/controls_5pt1g_z30_llTT_oad','m1sys','fem')
-% load('../controls_5pt1g1K_z30_llTTsoftHP_oad.mat','m1sys','fem')
+
+load('controls_5pt1g_z30_llTT_oad','m1sys','fem')
 
 
 % m1sys{seg}.HPstiff: Hardpoint stiffness
@@ -61,7 +58,7 @@ if true
 end
 
 m1_act_damp = 1800; %[Ns/m] Actuator damping
-m1_dt_folder = '/Users/rromano/Documents/MATLAB/M1';
+m1_dt_folder = [];
 if(seg < 7)
     load(fullfile(m1_dt_folder,'OA_SupportActuatorArrayConfig'),'OA_Upsilon');
     Upsilon = OA_Upsilon;
@@ -76,7 +73,8 @@ end
 
 % ===>>> User shall check file path and name
 % FileFolder = fullfile(im.lfFolder,"20240403_1556_zen_30_M1_202110_FSM_202305_Mount_202305_IDOM_concreteAndFoundation_finalSI");
-FileFolder = fullfile(im.lfFolder,"20250430_1659_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
+% FileFolder = fullfile(im.lfFolder,"20250430_1659_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
+FileFolder = fullfile(im.lfFolder,"20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
 
 if(~exist('inputTable','var') || 0)
     % Start loading modal model parameters
