@@ -1,5 +1,9 @@
 # Matlab
 **/matlab-simulink/*.asv
+**/matlab-simulink/*.slx.autosave
+*.slxc
+**/matlab-simulink/slprj/
+
 
 # Draw
 *.drawio.bkp

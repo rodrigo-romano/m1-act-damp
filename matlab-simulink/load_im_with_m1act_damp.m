@@ -2,7 +2,7 @@
 % Load M1HP driven by the CPP algorithm described in GMT-DOC-04111.
 % (load_m1hp_cpp_demo.m)
 
-simulink_fname = "cpp_m1hp_demo";
+simulink_fname = "im_with_m1act_damp";
 
 %% General IM settings
 %%
@@ -15,9 +15,9 @@ sZa = "30";
 % - - - - - Simulation setting flags (0:disables) - - - - -
 clear osim
 osim.reduce_model = 0;  % DO NOT ENABLE UNTIL TODO IS DONE![bool] model reduction feature
-osim.dc_mm_comp = 1;    % [bool] DC mismatch compensation
-osim.bpless_wl = 0;     % [bool] Smoothing wind load
-osim.wload_en = 0;      % [bool] Wind load input
+osim.dc_mm_comp = 0;    % [bool] DC mismatch compensation
+osim.bpless_wl = 1;     % [bool] Smoothing wind load
+osim.wload_en = 1;      % [bool] Wind load input
 % MNT
 osim.mntC_en = 1;       % [bool] Mount feedback control loop switch
 osim.en_servo = 0;      % [bool] Enable/disable mount trajectory
@@ -25,32 +25,31 @@ osim.mnt_FFc_en = 1;    % [bool] Azimuth feedforward action switch
 % M1
 osim.m1olf_en = 0;      % [bool] M1 outer force loop switch
 osim.m1cpp_en = 1;      % [bool] M1 Command pre-processor activation flag
-% M2
-osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
-osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
+% % M2
+% osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
+% osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
 
 %% Telescope structural dynamics model
 %%
-% ModelFolder = "20230522_1804_zen_30_M1_202110_FSM_202305_Mount_202305";
-% ModelFolder = "20230530_1756_zen_30_M1_202110_FSM_202305_Mount_202305_noStairs";
-ModelFolder = "20230809_1434_zen_30_M1_202110_FSM_202305_Mount_202305_IDOM_concreteAndFoundation";
-FileName = "modal_state_space_model_2ndOrder.mat";
+
+% mfolder = '/home/rromano/Workspace/gmt-data';
+mFolder = '/home/rromano/mnt';
+ModelID = "20250516_1420_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
+fName = "modal_state_space_model_2ndOrder.mat";
     
 if(~exist('inputTable','var') || 1)
     try
-        fprintf('Loading structural model %s from\n%s\n', FileName, ModelFolder);
-        load(fullfile('/home/rromano/Workspace/gmt-data',...
-            ModelFolder,FileName),...
+        fprintf('Loading structural model %s from\n%s\n', fName, ModelID);
+        load(fullfile(mFolder, ModelID, fName),...
             'inputs2ModalF','modalDisp2Outputs',...
             'eigenfrequencies','proportionalDampingVec',...
             'inputTable','outputTable');
     catch
         error("Unable to load structural model files from \n%s"+...
-            "Download them from DROBO.",ModelFolder);
+            "Download files from AWS-S3 (or DROBO).",ModelID);
     end
     % Static solution gain matrix
-    staticSolFile = fullfile('/home/rromano/Workspace/gmt-data',...
-        ModelFolder,"static_reduction_model.mat");
+    staticSolFile = fullfile(mFolder, ModelID,"static_reduction_model.mat");
     try
         load(staticSolFile,'gainMatrixMountControlled');
         gainMatrix = gainMatrixMountControlled;
@@ -65,10 +64,11 @@ end
 % INPUTS
 desiredInputLabels = [...
     "OSS_ElDrive_Torque"; "OSS_AzDrive_Torque"; "OSS_RotDrive_Torque";...
-    "OSS_Harpoint_delta_F"; "M1_actuators_segment_1";...
+    "OSS_Harpoint_delta_F"; "OSS_Hardpoint_extension"; "M1_actuators_segment_1";...
     "M1_actuators_segment_2"; "M1_actuators_segment_3";...
     "M1_actuators_segment_4"; "M1_actuators_segment_5";...
-    "M1_actuators_segment_6"; "M1_actuators_segment_7"; "OSS_M1_lcl_6F"];
+    "M1_actuators_segment_6"; "M1_actuators_segment_7"; "OSS_M1_lcl_6F";...
+    "CFD_202504_6F"];
 isDesired = zeros(size(inputs2ModalF,2),1);
 modelMuxDims = zeros(numel(desiredInputLabels),1);
 
@@ -83,16 +83,23 @@ modelMuxDims(modelMuxDims == 0) = [];
 % OUTPUTS
 desiredOutputLabels = [...
     "OSS_ElEncoder_Angle"; "OSS_AzEncoder_Angle"; "OSS_RotEncoder_Angle";...
-    "OSS_Hardpoint_D"; "OSS_M1_lcl"];
+    "OSS_Hardpoint_D"; "M1_actuators_segment_1_D"; "M1_actuators_segment_2_D";...
+    "M1_actuators_segment_3_D";"M1_actuators_segment_4_D";...
+    "M1_actuators_segment_5_D";"M1_actuators_segment_6_D"; "M1_actuators_segment_7_D";...
+    "OSS_M1_lcl";"OSS_Hardpoint_force"];
 isDesired = zeros(size(modalDisp2Outputs,1),1);
 modelDemuxDims = zeros(numel(desiredOutputLabels),1);
 
 for i1 = 1:numel(desiredOutputLabels)
     aux = outputTable{desiredOutputLabels(i1),"indices"}{1}(:);
-    isDesired(aux) = 1;
+    if(contains(desiredOutputLabels(i1),"M1_actuators_segment_"))
+        isDesired(aux) = 2;
+    else, isDesired(aux) = 1;
+    end
     modelDemuxDims(i1) = length(aux);
 end
 indDesOutputs = find(isDesired ~= 0);
+ind_M1act_vel = find(isDesired == 2);
 modelDemuxDims(modelDemuxDims == 0) = [];
 
 %
@@ -134,6 +141,7 @@ end
 
 phiB = inputs2ModalF(mode_ind_vec,indDesInputs);
 phiC = modalDisp2Outputs(indDesOutputs,mode_ind_vec);
+phiCvel = modalDisp2Outputs(ind_M1act_vel,mode_ind_vec);
 
 s_rate_msg = 'Telescope structural model sampling rate set to %gkHz\n';
 if((FEM_Ts ~= 1/8e3) && (FEM_Ts ~= 1e-3)), warning(s_rate_msg,1/FEM_Ts/1e3);
@@ -178,9 +186,10 @@ Hdrive_d = c2d(o.Hdrive(1,1), FEM_Ts, 'tustin');
 %% Load M1 subsystems data (controllers and parameters)
 %%
 % File with controller and interface parameters
-% ctrl_filename = './versions/controls_5pt1f_z30_llTT_oad.mat';
-ctrl_filename = sprintf('controls_5pt1g1K_z%s_llTT_oad',sZa);
-load(fullfile("./demo_data",ctrl_filename),'m1sys');
+ctrl_fname = sprintf('controls_5pt1g_z%s_llTT_oad',sZa);
+load(fullfile(ctrl_fname),'m1sys');
+m1_act_damp = 1800; %[Ns/m] Actuator damping
+
 
 %% M1 Command pre-processor (CCP)
 %%
@@ -304,7 +313,14 @@ end
 
 
 
+%%
 
+dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
+dtin_file = fullfile(dtin_path,'model_data_1.parquet');
+parquetINFO = parquetinfo(dtin_file);
+cfd_in = parquetread(dtin_file, "SampleRate",1e3,...
+        "SelectedVariableNames", parquetINFO.VariableNames);
+    % "CFDMountWindLoads"    "CFDM1WindLoads"    "CFDM2WindLoads"
 
 
 %% Auxiliary functions
