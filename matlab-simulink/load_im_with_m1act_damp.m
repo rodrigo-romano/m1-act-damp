@@ -1,9 +1,10 @@
 %
-% 
+% Script to load the Simulink model parameters. The model includes the
+% structural dynamics, the mount, the M1 actuator force and positon loops.
+% This model provides an implementation of the M1 actuator damping.
 % 
 
 simulink_fname = "im_with_m1act_damp";
-% simulink_fname = "im_with_m1act_damp_CT";
 
 %% General IM settings
 %%
@@ -24,11 +25,12 @@ osim.mntC_en = 1;       % [bool] Mount feedback control loop switch
 osim.en_servo = 0;      % [bool] Enable/disable mount trajectory
 osim.mnt_FFc_en = 1;    % [bool] Azimuth feedforward action switch      
 % M1
-osim.m1olf_en = 0;      % [bool] M1 outer force loop switch
+osim.m1olf_en = 1;      % [bool] M1 outer force loop switch
 osim.m1cpp_en = 0;      % [bool] M1 Command pre-processor activation flag
 % % M2
 % osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
 % osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
+
 
 %% Telescope structural dynamics model
 %%
@@ -61,6 +63,7 @@ if(~exist('inputTable','var') || 0)
     fprintf('Static gain matrix loaded from\n%s\n', staticSolFile);
 end
 
+
 %% Pick model IOs according to inputTable and outputTables
 %%
 % INPUTS
@@ -87,8 +90,8 @@ desiredOutputLabels = [...
     "OSS_ElEncoder_Angle"; "OSS_AzEncoder_Angle"; "OSS_RotEncoder_Angle";...
     "OSS_Hardpoint_D"; "M1_actuators_segment_1_D"; "M1_actuators_segment_2_D";...
     "M1_actuators_segment_3_D";"M1_actuators_segment_4_D";...
-    "M1_actuators_segment_5_D";"M1_actuators_segment_6_D"; "M1_actuators_segment_7_D";...
-    "OSS_M1_lcl";"OSS_Hardpoint_force"];
+    "M1_actuators_segment_5_D";"M1_actuators_segment_6_D";...
+    "M1_actuators_segment_7_D";"OSS_M1_lcl";"OSS_Hardpoint_force"];
 isDesired = zeros(size(modalDisp2Outputs,1),1);
 modelDemuxDims = zeros(numel(desiredOutputLabels),1);
 
@@ -110,14 +113,6 @@ modelDemuxDims(modelDemuxDims == 0) = [];
 % desiredOutputLabels,modelDemuxDims,'GMT')
 % to create the structural model block with the selected IOs.
 %
-
-%%
-
-m1_dt_folder = [];
-load(fullfile(m1_dt_folder,'OA_SupportActuatorArrayConfig'),'OA_Upsilon');
-load(fullfile(m1_dt_folder,'CS_SupportActuatorArrayConfig'),'CS_Upsilon');
-    Upsilon = blkdiag(OA_Upsilon,OA_Upsilon,OA_Upsilon,OA_Upsilon,...
-        OA_Upsilon,OA_Upsilon, CS_Upsilon);
 
 
 %% Structural model discretization
@@ -197,10 +192,23 @@ Hdrive_d = c2d(o.Hdrive(1,1), FEM_Ts, 'tustin');
 
 %% Load M1 subsystems data (controllers and parameters)
 %%
+
 % File with controller and interface parameters
 ctrl_fname = sprintf('controls_5pt1g_z%s_llTT_oad',sZa);
 load(fullfile(ctrl_fname),'m1sys');
+% Overwrite controller with Lead-lag+PI (as in test cell) and update SA
+% dynamics.
+m1sys = ovr_ofl_crtl(m1sys);
+
 m1_act_damp = 1800; %[Ns/m] Actuator damping
+
+% Upsilon maps the actuator forces into forces and moments about the mirror
+% CG.
+m1_dt_folder = [];
+load(fullfile(m1_dt_folder,'OA_SupportActuatorArrayConfig'),'OA_Upsilon');
+load(fullfile(m1_dt_folder,'CS_SupportActuatorArrayConfig'),'CS_Upsilon');
+    Upsilon = blkdiag(OA_Upsilon,OA_Upsilon,OA_Upsilon,OA_Upsilon,...
+        OA_Upsilon,OA_Upsilon, CS_Upsilon);
 
 
 %% M1 Command pre-processor (CCP)
@@ -325,8 +333,6 @@ end
 
 
 
-
-
 %%
 
 dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
@@ -339,6 +345,55 @@ cfd_in = parquetread(dtin_file, "SampleRate",1e3,...
 
 %% Auxiliary functions
 %%
+
+function m1sys = ovr_ofl_crtl(m1sys)  
+
+% M1 outer force loop (OFL) controller matrix
+ofl.Ts = 1/100;  % OFL sampling time
+
+% OFL controller --- PI+Lead-lag (SPIE2024-)
+fPI = tf([0.1 5],[1 0]);
+flead = tf([1 0.1*2*pi],[1 0.3*2*pi]);
+flag = tf([1 15*2*pi],[1 5*2*pi]);
+fbH = fPI * flead * flag;
+
+oflC_ss = cell(6,1);
+
+% Lag term to approximate nonlinear pneumatic circuit behavior
+HlagDT = c2d(0.2/1 *tf([1 1*2*pi],[1 0.2*2*pi]), m1sys{1}.SAdyn.Ts, 'tustin');
+
+for seg = 1:7
+    % Controller channel loop
+    for ich = 1:numel(oflC_ss)
+        oflC_ss{seg} = balreal(ss(fbH));
+        m1sys{seg}.ofl.SSdtC{ich} = c2d(oflC_ss{seg},ofl.Ts,'foh');
+
+        % Display BODE plot to assess the effect of the discretization
+        if(false && seg == 1)
+            plot_labels = {'F_x','F_y','F_z','M_x','M_y','M_z'};
+            hbode = bodeoptions;
+            hbode.FreqUnits = 'Hz';
+            hbode.XLabel.FontSize = 11;
+            hbode.YLabel.FontSize = 11;
+            hbode.Ylabel.String{1} = 'Mag';
+            hbode.Title.FontSize = 12;
+            figure(7000+seg)
+            subplot(2,3,ich)
+            bode(oflC_ss{seg},hbode); hold on;
+            bode(m1sys{seg}.ofl.SSdtC{ich},'r--',hbode); hold off;
+            grid on; title(sprintf('OFL %s Controller',plot_labels{ich}));
+            xlim([0.05, 0.5/ofl.Ts])
+            if ich == numel(oflC_ss)
+                set(gcf,'Position',[600   567   1.6*304*3/2   420*0.95]);
+                legend('CT','DT','Location','northwest'); legend box off;
+            end
+        end
+    end
+    % Update support actuator dynamics
+    m1sys{seg}.SAdyn = m1sys{seg}.SAdyn*HlagDT;
+end
+
+end
 
 %% Function to get 
 function o = get_odc_mnt_dt(sZa)

@@ -210,7 +210,7 @@ Hd = freqresp(tf([1 0],1),w);
 fb_sys = eye(6)*frd(Hd(:), w, fem.Ts)*m1_act_damp;
 sys = feedback(res, fb_sys, feedin, 1:6, -1);
 
-% Lag term to represent pneumatic circuit nonlinearity
+% Lag term to approximate nonlinear pneumatic circuit behavior
 Hlag = freqresp(0.2/1 *tf([1 1*2*pi],[1 0.2*2*pi]), w);
 
 in_hp_lcD = 6+(1:6);
