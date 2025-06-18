@@ -1,8 +1,9 @@
 %
-% Load M1HP driven by the CPP algorithm described in GMT-DOC-04111.
-% (load_m1hp_cpp_demo.m)
+% 
+% 
 
 simulink_fname = "im_with_m1act_damp";
+% simulink_fname = "im_with_m1act_damp_CT";
 
 %% General IM settings
 %%
@@ -15,7 +16,7 @@ sZa = "30";
 % - - - - - Simulation setting flags (0:disables) - - - - -
 clear osim
 osim.reduce_model = 0;  % DO NOT ENABLE UNTIL TODO IS DONE![bool] model reduction feature
-osim.dc_mm_comp = 0;    % [bool] DC mismatch compensation
+osim.dc_mm_comp = 1;    % [bool] DC mismatch compensation
 osim.bpless_wl = 1;     % [bool] Smoothing wind load
 osim.wload_en = 1;      % [bool] Wind load input
 % MNT
@@ -24,7 +25,7 @@ osim.en_servo = 0;      % [bool] Enable/disable mount trajectory
 osim.mnt_FFc_en = 1;    % [bool] Azimuth feedforward action switch      
 % M1
 osim.m1olf_en = 0;      % [bool] M1 outer force loop switch
-osim.m1cpp_en = 1;      % [bool] M1 Command pre-processor activation flag
+osim.m1cpp_en = 0;      % [bool] M1 Command pre-processor activation flag
 % % M2
 % osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
 % osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
@@ -34,10 +35,11 @@ osim.m1cpp_en = 1;      % [bool] M1 Command pre-processor activation flag
 
 % mfolder = '/home/rromano/Workspace/gmt-data';
 mFolder = '/home/rromano/mnt';
-ModelID = "20250516_1420_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
+% ModelID = "20250516_1420_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
+ModelID = "20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
 fName = "modal_state_space_model_2ndOrder.mat";
     
-if(~exist('inputTable','var') || 1)
+if(~exist('inputTable','var') || 0)
     try
         fprintf('Loading structural model %s from\n%s\n', fName, ModelID);
         load(fullfile(mFolder, ModelID, fName),...
@@ -64,11 +66,11 @@ end
 % INPUTS
 desiredInputLabels = [...
     "OSS_ElDrive_Torque"; "OSS_AzDrive_Torque"; "OSS_RotDrive_Torque";...
-    "OSS_Harpoint_delta_F"; "OSS_Hardpoint_extension"; "M1_actuators_segment_1";...
+    "OSS_Harpoint_delta_F"; "M1_actuators_segment_1";...
     "M1_actuators_segment_2"; "M1_actuators_segment_3";...
     "M1_actuators_segment_4"; "M1_actuators_segment_5";...
     "M1_actuators_segment_6"; "M1_actuators_segment_7"; "OSS_M1_lcl_6F";...
-    "CFD_202504_6F"];
+    "CFD_202504_6F"; "OSS_Hardpoint_extension";];
 isDesired = zeros(size(inputs2ModalF,2),1);
 modelMuxDims = zeros(numel(desiredInputLabels),1);
 
@@ -103,11 +105,20 @@ ind_M1act_vel = find(isDesired == 2);
 modelDemuxDims(modelDemuxDims == 0) = [];
 
 %
-% Use
+% REMARK: Use
 % utils.createStructDynGMTslx(desiredInputLabels,modelMuxDims,...
 % desiredOutputLabels,modelDemuxDims,'GMT')
 % to create the structural model block with the selected IOs.
 %
+
+%%
+
+m1_dt_folder = [];
+load(fullfile(m1_dt_folder,'OA_SupportActuatorArrayConfig'),'OA_Upsilon');
+load(fullfile(m1_dt_folder,'CS_SupportActuatorArrayConfig'),'CS_Upsilon');
+    Upsilon = blkdiag(OA_Upsilon,OA_Upsilon,OA_Upsilon,OA_Upsilon,...
+        OA_Upsilon,OA_Upsilon, CS_Upsilon);
+
 
 %% Structural model discretization
 %%
@@ -125,6 +136,7 @@ if osim.reduce_model
 else
     nr = length(eigenfrequencies(:));
     mode_ind_vec = 1:nr;
+%     mode_ind_vec = 4:nr;
 end
 
 % om^2 and 2*zeta*om vectors 
@@ -223,9 +235,11 @@ i_s1_ = find(t < t_s1, 1, 'last');
 i_s2_ = find(t < t_s2, 1, 'last');
 i_s3_ = find(t < t_s3, 1, 'last');
 
-tj_mode = 'piston';%'normal';% uniform
+tj_mode = 'static';%'piston';%'normal';% uniform
 rng(1);     % Set RNG seed
 switch tj_mode
+    case 'static'
+        r = zeros(4,6);
     case 'normal'
         mean_r = 0;
         std_r = 2e-5;

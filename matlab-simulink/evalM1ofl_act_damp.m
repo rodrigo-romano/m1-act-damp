@@ -7,9 +7,9 @@
 %% General settings
 
 % Number of frequency response points
-Nom = 1000;
+Nom = 2000;
 % Frequency points (rad/s)
-w = logspace(log10(0.1),log10(75),Nom)*2*pi;
+w = logspace(log10(0.1),log10(100),Nom)*2*pi;
 % Figure number to avoid overwrite
 figNumber = 2000;
 % M1 segment
@@ -71,10 +71,10 @@ end
 
 %% Load FE plant SS model
 
+mFolder = '/home/rromano/mnt';
 % ===>>> User shall check file path and name
-% FileFolder = fullfile(im.lfFolder,"20240403_1556_zen_30_M1_202110_FSM_202305_Mount_202305_IDOM_concreteAndFoundation_finalSI");
 % FileFolder = fullfile(im.lfFolder,"20250430_1659_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
-FileFolder = fullfile(im.lfFolder,"20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
+FileFolder = fullfile(mFolder,"20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
 
 if(~exist('inputTable','var') || 0)
     % Start loading modal model parameters
@@ -103,7 +103,7 @@ if(~exist('inputTable','var') || 0)
         twice_zom = -aux(temp(end)+1:end,2);    % Vector of 2*damp*om
     end
     
-    if true
+    if false
         % Remove the first 3 modes and adjusts SS model matrices
         [aux,temp] = spdiags(full(A));
         om2 = om2(1+3:end);
@@ -193,8 +193,9 @@ Hpk = mean(HPstiffvec);
 %% Plant Frequency Responses
 %%
 % Structural plant submodel frequenct response
-if(~exist('res','var') || 0)
+if(~exist('res','var') || 1)
     res = bode_second_order(objM1,w,om0,damp,1:nu,1:ny);
+%     res = bode_second_order_d(objM1,w,om0,damp,1:nu,1:ny, fem.Ts);
     res = frd(res,w,fem.Ts);
 end
 
@@ -208,17 +209,50 @@ Z_ = zeros(length(out0));
 Hd = freqresp(tf([1 0],1),w);
 fb_sys = eye(6)*frd(Hd(:), w, fem.Ts)*m1_act_damp;
 sys = feedback(res, fb_sys, feedin, 1:6, -1);
-sys4 = feedback(res, fb_sys*4, feedin, 1:6, -1);
 
-% lag term to represent pneumatic circuit nonlinearity
-H_ = freqresp(0.2/1 *tf([1 1*2*pi],[1 0.2*2*pi]), w);
+% Lag term to represent pneumatic circuit nonlinearity
+Hlag = freqresp(0.2/1 *tf([1 1*2*pi],[1 0.2*2*pi]), w);
 
 in_hp_lcD = 6+(1:6);
 in_hp_lcF = 12+(1:6);
 G0 = -m1sys{seg}.LC2CG* Hpk *res(in_hp_lcD,:)*SAdyn_Fr;
 G = -m1sys{seg}.LC2CG* Hpk *sys(in_hp_lcD,:)*SAdyn_Fr;
-% G_ = -m1sys{seg}.LC2CG* sys4(in_hp_lcF,:)*SAdyn_Fr;
-G__ = -m1sys{seg}.LC2CG *Hpk *sys(in_hp_lcD,:) *frd(H_, w, fem.Ts) *SAdyn_Fr;
+% G_ = -m1sys{seg}.LC2CG* sys_(in_hp_lcF,:)*SAdyn_Fr;
+G__ = -m1sys{seg}.LC2CG *Hpk *sys(in_hp_lcD,:) *frd(Hlag, w, fem.Ts) *SAdyn_Fr;
+% DEBUG TFs
+% G0 = res(1:6,:)*eye(6)*m1_act_damp;
+% G = res(1:6,:)*fb_sys;
+% G__ = sys(in_hp_lcD,:) *frd(H_, w, fem.Ts);
+
+%% Generalized MIMO Nyquist criteria
+%%
+% Let P_ol denote the number of open-loop RHP poles in the loop gain L(s).
+% Then the closed-loop system (I + L(s))−1 is stable iff the Nyquist plot
+% of det(I+L(s))
+% (i) makes Pol anti-clockwise encirclements of the origin, and
+% (ii) does not pass through the origin
+
+% Nominal linear damping
+G_ = fb_sys * res(1:6,:);
+dets = eye_p_det(G_.ResponseData);
+detG_ = frd(dets(:), G_.Frequency);
+% Lower damping
+G0_ = eye(6)*frd(Hd(:), w, fem.Ts)* 180 * res(1:6,:);
+dets = eye_p_det(G0_.ResponseData);
+detG0_ = frd(dets(:), G0_.Frequency);
+
+figure(100);
+subplot(221)
+nyquist(detG0_);
+legend('180Ns/m')
+subplot(222)
+nyquist(G0_(4,3),G0_(5,3),G0_(3,3));
+legend('R_x', 'R_y', 'T_z','Location','northwest')
+subplot(223)
+nyquist(detG_);
+legend('1800Ns/m')
+subplot(224)
+nyquist(G_(4,3),G_(5,3),G_(3,3));
 
 
 %% Open-loop frequency response magnitude
@@ -244,7 +278,7 @@ for i1 = 1:6
     hold off;
     if(i1 > 3), xlabel('Frequency (Hz)','fontsize',hbode.YLabel.FontSize); end
     if(mod(i1,3) == 1), ylabel('Magnitude (dB)','fontsize',hbode.YLabel.FontSize); end
-    xlim([0.1,50]); grid on;
+    xlim([0.1,100]); grid on;
     title(label_{i1},'fontsize',hbode.YLabel.FontSize)
     
     if(i1==1)
@@ -256,6 +290,21 @@ for i1 = 1:6
     end
 end
 
+
+%%
+%%
+
+if(0)
+    figure(figNumber*seg+4)
+    sigmaG = sigma(G);
+
+    hsk = semilogx((w/2/pi)',20*log10(squeeze(sigmaG(1,:))));
+    hold on;
+    semilogx((w/2/pi)',20*log10(squeeze(sigmaG(6,:))),'color', hsk.Color);
+
+    % Resize to report format
+    set(gcf,'Position',[900   267   304*3/2   420*1.2]);
+end
 
 return
 %% Loop caracterization: margins, sensitivity and bandwidth
@@ -433,22 +482,25 @@ plot_labels = {'F_x','F_y','F_z','M_x','M_y','M_z'};
 for ich = 1:numel(oflC_ss)
     oflC_ss{seg} = balreal(ss(fbH));
     m1sys{seg}.ofl.SSdtC{ich} = c2d(oflC_ss{seg},ofl.Ts,'foh');
-    
-    hbode = bodeoptions;
-    hbode.FreqUnits = 'Hz';
-    hbode.XLabel.FontSize = 11;
-    hbode.YLabel.FontSize = 11;
-    hbode.Ylabel.String{1} = 'Mag';
-    hbode.Title.FontSize = 12;
-    figure(7000+seg)
-    subplot(2,3,ich)
-    bode(oflC_ss{seg},hbode); hold on;
-    bode(m1sys{seg}.ofl.SSdtC{ich},'r--',hbode); hold off;
-    grid on; title(sprintf('OFL %s Controller',plot_labels{ich}));
-    xlim([0.05, 0.5/ofl.Ts])
+    if(false)
+        hbode = bodeoptions;
+        hbode.FreqUnits = 'Hz';
+        hbode.XLabel.FontSize = 11;
+        hbode.YLabel.FontSize = 11;
+        hbode.Ylabel.String{1} = 'Mag';
+        hbode.Title.FontSize = 12;
+        figure(7000+seg)
+        subplot(2,3,ich)
+        bode(oflC_ss{seg},hbode); hold on;
+        bode(m1sys{seg}.ofl.SSdtC{ich},'r--',hbode); hold off;
+        grid on; title(sprintf('OFL %s Controller',plot_labels{ich}));
+        xlim([0.05, 0.5/ofl.Ts])
+        if ich == numel(oflC_ss)
+            set(gcf,'Position',[600   567   1.6*304*3/2   420*0.95]);
+            legend('CT','DT','Location','northwest'); legend box off;
+        end
+    end
 end
-set(gcf,'Position',[600   567   1.6*304*3/2   420*0.95]);
-legend('CT','DT','Location','northwest'); legend box off;
 end
 
 
@@ -469,7 +521,7 @@ semilogx(S_env_w,S_env_mag,'r--','Linewidth',2.5);
 end
 
 %%
-function plot_S_envelope()
+function plot_S_envelope() %#ok<*DEFNU> 
 
 ax = findobj(gcf,'type','axes');
 xlim_ = get(ax(1),'XLim');
@@ -525,5 +577,78 @@ text(0.9*xlim_(1),-GM,sprintf('robustness\nboundary'),...
     'HorizontalAlignment','left',...
     'VerticalAlignment','bottom',...
     'color',bcolor,'Fontsize',12);
+end
 
+
+%%
+function dets = eye_p_det(A)
+    % Works for any n x n x k matrix
+    % A is n x n x k
+    dets = arrayfun(@(i) det(eye(length(A(:,:,i)))+A(:,:,i)), 1:size(A,3));
+end
+
+%%
+function assessSigmaStability(G_frd)
+    % Comprehensive stability assessment from sigma plot
+    
+    figure;
+    sigma(G_frd);
+    grid on;
+    hold on;
+    
+    % Add reference lines
+    xlim_vals = xlim;
+    plot(xlim_vals, [0 0], 'r--', 'LineWidth', 2);
+    plot(xlim_vals, [-6 -6], 'g--', 'LineWidth', 1); % 6 dB margin line
+    
+    % Extract data
+    [sv, w] = sigma(G_frd);
+    sv_max_db = 20*log10(sv(1,:));
+    sv_min_db = 20*log10(sv(end,:));
+    
+    % Find critical values
+    [peak_db, peak_idx] = max(sv_max_db);
+    gain_margin = -peak_db;
+    critical_freq = w(peak_idx);
+    
+    % Assess stability
+    fprintf('\n=== SIGMA PLOT STABILITY ASSESSMENT ===\n');
+    fprintf('Maximum σ̄(G): %.2f dB at %.2f rad/s\n', peak_db, critical_freq);
+    fprintf('Gain Margin: %.2f dB\n', gain_margin);
+    
+    if peak_db < -6
+        status = 'GOOD STABILITY MARGINS';
+        color = 'green';
+    elseif peak_db < 0
+        status = 'MARGINAL STABILITY';
+        color = 'yellow';
+    else
+        status = 'POTENTIALLY UNSTABLE';
+        color = 'red';
+    end
+    
+    fprintf('Status: %s\n', status);
+    
+    % Add annotations to plot
+    plot(critical_freq, peak_db, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'red');
+    text(critical_freq, peak_db+2, sprintf('Peak: %.1f dB', peak_db), ...
+         'HorizontalAlignment', 'center');
+    
+    title(sprintf('Sigma Plot - %s', status));
+    legend('σ̄(G)', 'σ(G)', '0 dB', '-6 dB margin', 'Peak', 'Location', 'best');
+    
+    % Additional robustness check
+    fprintf('\n=== ROBUSTNESS INDICATORS ===\n');
+    if min(sv_min_db) < -20
+        fprintf('Good conditioning (min σ > -20 dB)\n');
+    else
+        fprintf('Poor conditioning - check for near singularities\n');
+    end
+    
+    % Bandwidth estimate
+    bandwidth_idx = find(sv_max_db >= peak_db - 3, 1, 'last');
+    if ~isempty(bandwidth_idx)
+        bandwidth = w(bandwidth_idx);
+        fprintf('Approximate bandwidth: %.2f rad/s\n', bandwidth);
+    end
 end
