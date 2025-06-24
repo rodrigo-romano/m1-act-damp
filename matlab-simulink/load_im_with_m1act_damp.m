@@ -200,7 +200,8 @@ load(fullfile(ctrl_fname),'m1sys');
 % dynamics.
 m1sys = ovr_ofl_crtl(m1sys);
 
-m1_act_damp = 1800; %[Ns/m] Actuator damping
+m1_act_lin_d = 1800;    %[Ns/m] Linear M1 actuator damping
+m1_act_quad_d = 9000;   %[Ns^2/m^2] Quadratic M1 actuator damping
 
 % Upsilon maps the actuator forces into forces and moments about the mirror
 % CG.
@@ -293,22 +294,23 @@ if osim.dc_mm_comp
     try
         K_ss = phiC(:,4:end)* diag(1./((2*pi*eigenfrequencies(4:end)).^2))* phiB(4:end,:);        
         Psi_ss = gainMatrix(indDesOutputs,indDesInputs) - K_ss;
-        %
-        num_mnt_ax_in = contains(desiredInputLabels,...
-            ["OSS_ElDrive_Torque"; "OSS_AzDrive_Torque"; "OSS_RotDrive_Torque"]);
-        v_in = [1; 1; 1; zeros(numel(desiredInputLabels)-3,1)];
-        num_mnt_ax_out = contains(desiredOutputLabels,...
-            ["OSS_ElEncoder_Angle"; "OSS_AzEncoder_Angle"; "OSS_RotEncoder_Angle"]);
-        v_out = [1; 1; 1; zeros(numel(desiredOutputLabels)-3,1)];
         
-        if(all(num_mnt_ax_in == v_in) && all(num_mnt_ax_out == v_out))
-            Psi_ss(1:sum(outputTable.size(1:3)),:) = 0;
-            Psi_ss(:,1:sum(inputTable.size(1:3))) = 0;
-        else
-            warning("No entries of Psi_ss set to zero!"+...
-                "\nCheck for the chosen MNT IOs.\n");
+        noDCMCOutputLabels = [...
+            "OSS_ElEncoder_Angle"; "OSS_AzEncoder_Angle"; "OSS_RotEncoder_Angle";...
+            "M1_actuators_segment_1_D"; "M1_actuators_segment_2_D";...
+            "M1_actuators_segment_3_D";"M1_actuators_segment_4_D";...
+            "M1_actuators_segment_5_D";"M1_actuators_segment_6_D";...
+            "M1_actuators_segment_7_D"];
+        y_idx = [[1;cumsum(modelDemuxDims(1:end-1))+1], cumsum(modelDemuxDims)];
+        for iy = 1:numel(noDCMCOutputLabels)
+            idx = find(contains(desiredOutputLabels,noDCMCOutputLabels(iy)));    
+            Psi_ss(y_idx(idx,1):y_idx(idx,2), :) = 0;
+            if true
+                fprintf("Zeroing %d DCMC rows corresponding to output %s\n",...
+                    length(y_idx(idx,1):y_idx(idx,2)), noDCMCOutputLabels(iy));
+            end
         end
-        
+                
         Psi_ssTs = FEM_Ts;        
         set_param(memory_label,'Commented','off');
         set_param(matmult_label,'Commented','off');
