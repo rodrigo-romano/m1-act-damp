@@ -27,6 +27,7 @@ osim.mnt_FFc_en = 1;    % [bool] Azimuth feedforward action switch
 % M1
 osim.m1olf_en = 1;      % [bool] M1 outer force loop switch
 osim.m1cpp_en = 0;      % [bool] M1 Command pre-processor activation flag
+osim.m1act_damp = 0;    % [numeric] 0: no damping, 1: linear, and 2: quadratic
 % % M2
 % osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
 % osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
@@ -72,15 +73,20 @@ desiredInputLabels = [...
     "OSS_Harpoint_delta_F"; "M1_actuators_segment_1";...
     "M1_actuators_segment_2"; "M1_actuators_segment_3";...
     "M1_actuators_segment_4"; "M1_actuators_segment_5";...
-    "M1_actuators_segment_6"; "M1_actuators_segment_7"; "OSS_M1_lcl_6F";...
-    "CFD_202504_6F"; "OSS_Hardpoint_extension";];
+    "M1_actuators_segment_6"; "M1_actuators_segment_7";...
+    "OSS_M1_lcl_6F";"MC_M2_lcl_6F";"CFD_202504_6F"; "OSS_Hardpoint_extension";];
 isDesired = zeros(size(inputs2ModalF,2),1);
 modelMuxDims = zeros(numel(desiredInputLabels),1);
+first_idx_vec = zeros(numel(desiredInputLabels),1);
 
 for i1 = 1:numel(desiredInputLabels)
-    aux = inputTable{desiredInputLabels{i1},"indices"}{1}(:);
+    aux = inputTable{desiredInputLabels{i1},"indices"}{1}(:);    
     isDesired(aux) = 1;
     modelMuxDims(i1) = length(aux);
+    first_idx_vec(i1) = aux(1); 
+end
+if any(diff(first_idx_vec) < 0)
+    error("Labels in desiredInputLabels must follow the inputTable ordering!");
 end
 indDesInputs = find(isDesired ~= 0);
 modelMuxDims(modelMuxDims == 0) = [];
@@ -91,9 +97,10 @@ desiredOutputLabels = [...
     "OSS_Hardpoint_D"; "M1_actuators_segment_1_D"; "M1_actuators_segment_2_D";...
     "M1_actuators_segment_3_D";"M1_actuators_segment_4_D";...
     "M1_actuators_segment_5_D";"M1_actuators_segment_6_D";...
-    "M1_actuators_segment_7_D";"OSS_M1_lcl";"OSS_Hardpoint_force"];
+    "M1_actuators_segment_7_D";"OSS_M1_lcl";"MC_M2_lcl_6D";"OSS_Hardpoint_force"];
 isDesired = zeros(size(modalDisp2Outputs,1),1);
 modelDemuxDims = zeros(numel(desiredOutputLabels),1);
+first_idx_vec = zeros(numel(desiredOutputLabels),1);
 
 for i1 = 1:numel(desiredOutputLabels)
     aux = outputTable{desiredOutputLabels(i1),"indices"}{1}(:);
@@ -102,6 +109,10 @@ for i1 = 1:numel(desiredOutputLabels)
     else, isDesired(aux) = 1;
     end
     modelDemuxDims(i1) = length(aux);
+    first_idx_vec(i1) = aux(1);
+end
+if any(diff(first_idx_vec) < 0)
+    error("Labels in desiredOutputLabels must follow the outputTable ordering!");
 end
 indDesOutputs = find(isDesired ~= 0);
 ind_M1act_vel = find(isDesired == 2);
@@ -200,7 +211,7 @@ load(fullfile(ctrl_fname),'m1sys');
 % dynamics.
 m1sys = ovr_ofl_crtl(m1sys);
 
-m1_act_lin_d = 1800;    %[Ns/m] Linear M1 actuator damping
+m1_act_lin_d = osim.m1act_damp*1800;    %[Ns/m] Linear M1 actuator damping
 m1_act_quad_d = 9000;   %[Ns^2/m^2] Quadratic M1 actuator damping
 
 % Upsilon maps the actuator forces into forces and moments about the mirror
@@ -211,7 +222,8 @@ load(fullfile(m1_dt_folder,'CS_SupportActuatorArrayConfig'),'CS_Upsilon');
 Upsilon = blkdiag(OA_Upsilon,OA_Upsilon,OA_Upsilon,OA_Upsilon,...
     OA_Upsilon,OA_Upsilon, CS_Upsilon);
 
-[M_oa_xyz2abc, M_cs_xyz2abc, M_oa_abc2xyz, M_cs_abc2xyz] = calc_ort2cylTs(m1_dt_folder);
+[M_oa_xyz2abc,M_cs_xyz2abc,M_oa_abc2xyz,M_cs_abc2xyz] = calc_ort2cylTs(m1_dt_folder);
+
 
 %% M1 Command pre-processor (CCP)
 %%
@@ -336,19 +348,27 @@ end
 
 
 
+%% Wind load time series
 %%
 
-dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
-dtin_file = fullfile(dtin_path,'model_data_1.parquet');
-parquetINFO = parquetinfo(dtin_file);
-cfd_in = parquetread(dtin_file, "SampleRate",1e3,...
-        "SelectedVariableNames", parquetINFO.VariableNames);
-    % "CFDMountWindLoads"    "CFDM1WindLoads"    "CFDM2WindLoads"
+wl_demux = [42,42, 468]; %#ok<*NASGU>
+
+if(osim.wload_en)
+    ModelFolder = fullfile(mFolder, ModelID);
+    
+    [IMLoads, wl_demux] = load_WLdt(ModelFolder,60);
+    set_param(simulink_fname+"/Wind Loads",'Commented','off');
+else
+    set_param(simulink_fname+"/Wind Loads",'Commented','on');
+end
+
+
 
 
 %% Auxiliary functions
 %%
 
+%% Function to overwrite M1 controller parameters
 function m1sys = ovr_ofl_crtl(m1sys)  
 
 % M1 outer force loop (OFL) controller matrix
@@ -398,7 +418,7 @@ end
 
 end
 
-%% Function to get 
+%% Function to get ODC mount controller parameters
 function o = get_odc_mnt_dt(sZa)
 
 % oTest.sZa: elevation zenith angle (ZA) as string e.g. '00','30','60'
@@ -530,3 +550,69 @@ M_cs_abc2xyz = M_cs_abc2xyzT';
 
 end
 
+%% Function to load wind-load time series
+function [windload_dt, wl_demux] = load_WLdt(ModelFolder, dur)
+
+dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
+dtin_file = fullfile(dtin_path,'model_data_1.parquet');
+try
+    parquetINFO = parquetinfo(dtin_file);
+    cfd_in = parquetread(dtin_file, "SampleRate",1e3,...
+        "SelectedVariableNames", parquetINFO.VariableNames);
+    % "CFDMountWindLoads"    "CFDM1WindLoads"    "CFDM2WindLoads"
+
+    n_mntdist = size(cfd_in.CFDMountWindLoads{1},1);
+    mountwl = reshape(cell2mat(cfd_in.CFDMountWindLoads),n_mntdist,[]);
+    m1wl = reshape(cell2mat(cfd_in.CFDM1WindLoads),42,[]);
+    m2wl = reshape(cell2mat(cfd_in.CFDM2WindLoads),42,[]);
+    time = seconds(cfd_in.Time);
+catch
+    error('Unable to load wind load time series from file \n%s\n',dtin_file);
+end
+
+fHz_wl = floor(1/diff(time(1:2)));
+fprintf("Wind load time series (%dHz) loaded from\n%s\n",fHz_wl,dtin_file);
+
+% Handle model extra inputs
+% Load inputTable
+load(fullfile(ModelFolder,'modal_state_space_model_2ndOrder.mat'),'inputTable');
+
+% List of identifiers of the inputs to be disregarded
+wl_descr = ["M2 cell";...
+    "Ap instrument";...
+    "Cable Trays";...
+    "Cabs and instavol";...
+    "Azimuth disk";...
+    "IP platform with IP";...
+    "Lab station volume";...
+    "instrument volume attached";...
+    "Laser Guide Star cabinet"];
+
+wl_sub_inds = zeros(length(wl_descr),2);
+
+% Take the starting index (first column) and the size of those inputs
+for i1 = 1:length(wl_descr)
+    aux = find(startsWith(inputTable.descriptions{'CFD_202504_6F'}(:),wl_descr(i1)));
+    wl_sub_inds(i1,:) = [aux(1), length(aux)];
+end
+
+[~,i__] = sort(wl_sub_inds);
+% Insert 0 at columns of the time series related to disregarded model inputs
+for i1 = 1:length(wl_descr)
+    mountwl = [mountwl(1:wl_sub_inds(i__(i1),1)-1,:);...
+        zeros(wl_sub_inds(i__(i1),2),size(mountwl,2));...
+        mountwl(wl_sub_inds(i__(i1),1):end,:)];
+end
+
+% Take data corresponding to the last Xsec (X=120).
+N = size(time,1);
+tdist_idxs = N-(dur*fHz_wl)+1:N;
+windload_dt.time = time(tdist_idxs);
+windload_dt.signals.values = ...
+    [m1wl(:,tdist_idxs); m2wl(:,tdist_idxs); mountwl(:,tdist_idxs)]';
+% Enforce first time instant to zero
+windload_dt.time = windload_dt.time - windload_dt.time(1);
+
+wl_demux = [42, 42, size(mountwl,1)];
+
+end
