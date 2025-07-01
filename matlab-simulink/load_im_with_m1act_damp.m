@@ -3,8 +3,10 @@
 % structural dynamics, the mount, the M1 actuator force and positon loops.
 % This model provides an implementation of the M1 actuator damping.
 % 
+%#ok<*UNRCH>
 
 simulink_fname = "im_with_m1act_damp";
+
 
 %% General IM settings
 %%
@@ -318,9 +320,9 @@ if osim.dc_mm_comp
         for iy = 1:numel(noDCMCOutputLabels)
             idx = find(contains(desiredOutputLabels,noDCMCOutputLabels(iy)));    
             Psi_ss(y_idx(idx,1):y_idx(idx,2), :) = 0;
-            if true
+            if false
                 fprintf("Zeroing %d DCMC rows corresponding to output %s\n",...
-                    length(y_idx(idx,1):y_idx(idx,2)), noDCMCOutputLabels(iy));
+                    length(y_idx(idx,1):y_idx(idx,2)), noDCMCOutputLabels(iy)); 
             end
         end
                 
@@ -481,18 +483,18 @@ i_cols = 1;
 i_rows = 1;
 for i_act = 1:size(OA_ActData,1)
 
-    if(OA_ActData(:,5) == 40)
-        M_oa_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = xyz2abc40;
+    if(OA_ActData(i_act,5) == 40)
+        M_oa_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = 1/3*xyz2abc40;
         M_oa_abc2xyzT((0:2)+i_rows, (0:2)+i_cols) = abc2xyz40';
         i_cols = i_cols+3;
         i_rows = i_rows+3;
-    elseif(OA_ActData(:,5) == 41)
-        M_oa_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = xyz2abc41;
+    elseif(OA_ActData(i_act,5) == 41)
+        M_oa_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = 1/3*xyz2abc41;
         M_oa_abc2xyzT((0:2)+i_rows, (0:2)+i_cols) = abc2xyz41';
         i_cols = i_cols+3;
         i_rows = i_rows+3;
-    elseif(OA_ActData(:,5) == 5)
-        M_oa_xyz2abc((0:5)+i_rows, (0:2)+i_cols) = xyz2abc5;
+    elseif(OA_ActData(i_act,5) == 5)
+        M_oa_xyz2abc((0:5)+i_rows, (0:2)+i_cols) = 1/6*xyz2abc5;
         M_oa_abc2xyzT((0:5)+i_rows, (0:2)+i_cols) = abc2xyz5';
         i_cols = i_cols+3;
         i_rows = i_rows+6;
@@ -523,18 +525,18 @@ i_cols = 1;
 i_rows = 1;
 for i_act = 1:size(CS_ActData,1)
 
-    if(CS_ActData(:,5) == 40)
-        M_cs_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = xyz2abc40;
+    if(CS_ActData(i_act,5) == 40)
+        M_cs_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = 1/3*xyz2abc40;
         M_cs_abc2xyzT((0:2)+i_rows, (0:2)+i_cols) = abc2xyz40';
         i_cols = i_cols+3;
         i_rows = i_rows+3;
-    elseif(CS_ActData(:,5) == 41)
-        M_cs_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = xyz2abc41;
+    elseif(CS_ActData(i_act,5) == 41)
+        M_cs_xyz2abc((0:2)+i_rows, (0:2)+i_cols) = 1/3*xyz2abc41;
         M_cs_abc2xyzT((0:2)+i_rows, (0:2)+i_cols) = abc2xyz41';
         i_cols = i_cols+3;
         i_rows = i_rows+3;
-    elseif(CS_ActData(:,5) == 5)
-        M_cs_xyz2abc((0:5)+i_rows, (0:2)+i_cols) = xyz2abc5;
+    elseif(CS_ActData(i_act,5) == 5)
+        M_cs_xyz2abc((0:5)+i_rows, (0:2)+i_cols) = 1/6*xyz2abc5;
         M_cs_abc2xyzT((0:5)+i_rows, (0:2)+i_cols) = abc2xyz5';
         i_cols = i_cols+3;
         i_rows = i_rows+6;
