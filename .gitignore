@@ -3,7 +3,8 @@
 **/matlab-simulink/*.slx.autosave
 *.slxc
 **/matlab-simulink/slprj/
-
+**/matlab-simulink/m1act_damping_**.mat
+**/matlab-simulink/xyz2cyl_Transformations.mat
 
 # Draw
 *.drawio.bkp
