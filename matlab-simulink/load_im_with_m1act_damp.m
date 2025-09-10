@@ -27,7 +27,7 @@ osim.mnt_FFc_en = 1;    % [bool] Azimuth feedforward action switch
 % M1
 osim.m1olf_en = 1;      % [bool] M1 outer force loop switch
 osim.m1cpp_en = 0;      % [bool] M1 Command pre-processor activation flag
-osim.m1act_damp = 1;    % [numeric] 0: no damping, 1: linear, and 2: quadratic
+osim.m1act_damp = 0;    % [numeric] 0: no damping, 1: linear, and 2: quadratic
 % % M2
 % osim.m2PZT_en = 0;      % [bool] M2 PZT control loop switch
 % osim.m2_pos_en = 0;     % [bool] M2 Positioner control loop
@@ -36,8 +36,10 @@ osim.m1act_damp = 1;    % [numeric] 0: no damping, 1: linear, and 2: quadratic
 %% Telescope structural dynamics model
 %%
 
-% mfolder = '/home/rromano/Workspace/gmt-data';
-mFolder = '/home/rromano/mnt';
+if ismac(), mFolder = im.lfFolder;
+else, mFolder = '/home/rromano/mnt';
+end
+
 % ModelID = "20250516_1420_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
 ModelID = "20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping";
 fName = "modal_state_space_model_2ndOrder.mat";
@@ -392,7 +394,7 @@ for seg = 1:7
         m1sys{seg}.ofl.SSdtC{ich} = c2d(oflC_ss{seg},ofl.Ts,'foh');
 
         % Display BODE plot to assess the effect of the discretization
-        if(false && seg == 1)
+        if(true && seg == 1)
             plot_labels = {'F_x','F_y','F_z','M_x','M_y','M_z'};
             hbode = bodeoptions;
             hbode.FreqUnits = 'Hz';
@@ -433,7 +435,9 @@ oTest.sDamping ='02';
 %  which was created by the balred method
 oTest.bUseReducedModel = true;
 
-odc_file_folder = '/home/rromano/Workspace/gmt-mnt-odc';
+if ismac(), odc_file_folder = '/Users/rromano/Workspace/mnt-odc';
+else, odc_file_folder = '/home/rromano/Workspace/gmt-mnt-odc';
+end
 odc_main_folder = "fdr2023/MatlabFilesE2E_2023-05-10";
 odc_base_util_folder = fullfile(odc_file_folder,odc_main_folder,'base/util');
 odc_base_conf_folder = fullfile(odc_file_folder,odc_main_folder,'base/conf');
@@ -464,7 +468,11 @@ end
 %% Function to load wind-load time series
 function [windload_dt, wl_demux] = load_WLdt(ModelFolder, dur)
 
-dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
+if ismac
+    dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
+else
+    dtin_path = '/home/rromano/Workspace/dos-actors/clients/windloads';
+end
 dtin_file = fullfile(dtin_path,'model_data_1.parquet');
 try
     parquetINFO = parquetinfo(dtin_file);

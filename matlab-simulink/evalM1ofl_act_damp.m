@@ -7,7 +7,7 @@
 %% General settings
 
 % Number of frequency response points
-Nom = 2000;
+Nom = 1000;
 % Frequency points (rad/s)
 w = logspace(log10(0.1),log10(100),Nom)*2*pi;
 % Figure number to avoid overwrite
@@ -71,8 +71,10 @@ end
 
 %% Load FE plant SS model
 
-mFolder = '/home/rromano/mnt';
 % ===>>> User shall check file path and name
+if ismac(), mFolder = im.lfFolder;
+else, mFolder = '/home/rromano/mnt';
+end
 % FileFolder = fullfile(im.lfFolder,"20250430_1659_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
 FileFolder = fullfile(mFolder,"20250506_1715_zen_30_M1_202110_FSM_202305_Mount_202305_pier_202411_M1_actDamping");
 
@@ -103,7 +105,7 @@ if(~exist('inputTable','var') || 0)
         twice_zom = -aux(temp(end)+1:end,2);    % Vector of 2*damp*om
     end
     
-    if false
+    if true
         % Remove the first 3 modes and adjusts SS model matrices
         [aux,temp] = spdiags(full(A));
         om2 = om2(1+3:end);
@@ -203,7 +205,7 @@ end
 H1_sa = freqresp(tf(10*2*pi,[1 10*2*pi])*tf(50*2*pi,[1 50*2*pi]), w);
 SAdyn_Fr = frd(H1_sa, w, fem.Ts);
 
-% Loop frequency response
+% M1 linear damping
 feedin = 1:nu;
 Z_ = zeros(length(out0));
 Hd = freqresp(tf([1 0],1),w);
@@ -217,7 +219,7 @@ in_hp_lcD = 6+(1:6);
 in_hp_lcF = 12+(1:6);
 G0 = -m1sys{seg}.LC2CG* Hpk *res(in_hp_lcD,:)*SAdyn_Fr;
 G = -m1sys{seg}.LC2CG* Hpk *sys(in_hp_lcD,:)*SAdyn_Fr;
-% G_ = -m1sys{seg}.LC2CG* sys_(in_hp_lcF,:)*SAdyn_Fr;
+G_ = -m1sys{seg}.LC2CG* res(in_hp_lcF,:)*frd(Hlag, w, fem.Ts) *SAdyn_Fr;
 G__ = -m1sys{seg}.LC2CG *Hpk *sys(in_hp_lcD,:) *frd(Hlag, w, fem.Ts) *SAdyn_Fr;
 % DEBUG TFs
 % G0 = res(1:6,:)*eye(6)*m1_act_damp;
@@ -232,27 +234,29 @@ G__ = -m1sys{seg}.LC2CG *Hpk *sys(in_hp_lcD,:) *frd(Hlag, w, fem.Ts) *SAdyn_Fr;
 % (i) makes Pol anti-clockwise encirclements of the origin, and
 % (ii) does not pass through the origin
 
-% Nominal linear damping
-G_ = fb_sys * res(1:6,:);
-dets = eye_p_det(G_.ResponseData);
-detG_ = frd(dets(:), G_.Frequency);
-% Lower damping
-G0_ = eye(6)*frd(Hd(:), w, fem.Ts)* 180 * res(1:6,:);
-dets = eye_p_det(G0_.ResponseData);
-detG0_ = frd(dets(:), G0_.Frequency);
-
-figure(100);
-subplot(221)
-nyquist(detG0_);
-legend('180Ns/m')
-subplot(222)
-nyquist(G0_(4,3),G0_(5,3),G0_(3,3));
-legend('R_x', 'R_y', 'T_z','Location','northwest')
-subplot(223)
-nyquist(detG_);
-legend('1800Ns/m')
-subplot(224)
-nyquist(G_(4,3),G_(5,3),G_(3,3));
+if false
+    % Nominal linear damping
+    G_ = fb_sys * res(1:6,:);
+    dets = eye_p_det(G_.ResponseData);
+    detG_ = frd(dets(:), G_.Frequency);
+    % Lower damping
+    G0_ = eye(6)*frd(Hd(:), w, fem.Ts)* 180 * res(1:6,:);
+    dets = eye_p_det(G0_.ResponseData);
+    detG0_ = frd(dets(:), G0_.Frequency);
+    
+    figure(100);
+    subplot(221)
+    nyquist(detG0_);
+    legend('180Ns/m')
+    subplot(222)
+    nyquist(G0_(4,3),G0_(5,3),G0_(3,3));
+    legend('R_x', 'R_y', 'T_z','Location','northwest')
+    subplot(223)
+    nyquist(detG_);
+    legend('1800Ns/m')
+    subplot(224)
+    nyquist(G_(4,3),G_(5,3),G_(3,3));
+end
 
 
 %% Open-loop frequency response magnitude
@@ -271,10 +275,10 @@ for i1 = 1:6
     hold on;
     [MagG,~] = bode(G0(i1,i1),w);
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)));
-%     [MagG,~] = bode(G_(i1,i1),w);
-%     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)),'-.');
     [MagG,~] = bode(G__(i1,i1),w);
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)),'--');
+    [MagG,~] = bode(G_(i1,i1),w);
+    semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)),'-.');
     hold off;
     if(i1 > 3), xlabel('Frequency (Hz)','fontsize',hbode.YLabel.FontSize); end
     if(mod(i1,3) == 1), ylabel('Magnitude (dB)','fontsize',hbode.YLabel.FontSize); end
@@ -316,7 +320,10 @@ for ich = 1:6, m1oflmimo(ich,ich) = m1sys{seg}.ofl.SSdtC{ich}; end
 upsample_rate = m1sys{seg}.ofl.SSdtC{1}.Ts/fem.Ts;
 m1MIMO_C_Fr = frd(upsample(m1oflmimo, upsample_rate),w);
 
-GK = G__ * m1MIMO_C_Fr;
+% GK = G0 * m1MIMO_C_Fr; figNumber = 1000;
+GK = G_ * m1MIMO_C_Fr; figNumber = 3000;
+% GK = G__ * m1MIMO_C_Fr; figNumber = 2000;
+
 
 % Initialize variables
 GM = zeros(6,1);
@@ -362,7 +369,8 @@ xlim([0.1, 50]);%xlim([min(w)/2/pi,max(w)/2/pi])
 grid on; hold off;
 
 
-%% %
+%% 
+% Nichols plot
 figure(figNumber*seg+2)
 set(gcf,'Position',[910   350   304*3/2   420]);
 nicholsplot(GK(1,1),GK(2,2),GK(3,3),GK(4,4),GK(5,5),GK(6,6),hnichols);
@@ -376,8 +384,7 @@ legend('F_x','F_y','F_z','M_x','M_y','M_z',...
 
 grid on; hold off;
 
-
-% %
+% Sensitivity function plots
 figure(figNumber*seg+3)
 
 subplot(2,1,1)
@@ -393,7 +400,7 @@ legend('F_x','F_y','F_z','M_x','M_y','M_z',...
 grid on; hold off;
 ylabel('Magnitude (dB)','fontsize',hbode.YLabel.FontSize)
 title('Sensitivity functions','fontsize',hbode.YLabel.FontSize)
-xlim([min(w)/2/pi,max(w)/2/pi])
+xlim([min(w)/2/pi,w(end-10)/2/pi])
 
 subplot(2,1,2)
 for i1 = 1:6
@@ -482,7 +489,7 @@ plot_labels = {'F_x','F_y','F_z','M_x','M_y','M_z'};
 for ich = 1:numel(oflC_ss)
     oflC_ss{seg} = balreal(ss(fbH));
     m1sys{seg}.ofl.SSdtC{ich} = c2d(oflC_ss{seg},ofl.Ts,'foh');
-    if(false)
+    if(true)
         hbode = bodeoptions;
         hbode.FreqUnits = 'Hz';
         hbode.XLabel.FontSize = 11;
