@@ -6,12 +6,14 @@
 
 %% General settings
 
+% Structural model damping
+struct_damp = 0.02;
 % Number of frequency response points
-Nom = 1000;
+Nom = 500;
 % Frequency points (rad/s)
-w = logspace(log10(0.1),log10(100),Nom)*2*pi;
+w = logspace(log10(0.1),log10(50),Nom)*2*pi;
 % Figure number to avoid overwrite
-figNumber = 2000;
+figNumber = 1000;
 % M1 segment
 seg = 1;
 % Flag to load static model data
@@ -80,41 +82,11 @@ FileFolder = fullfile(mFolder,"20250506_1715_zen_30_M1_202110_FSM_202305_Mount_2
 
 if(~exist('inputTable','var') || 0)
     % Start loading modal model parameters
-    try
-        FileName = "modal_state_space_model_2ndOrder.mat";
-        load(fullfile(FileFolder,FileName),'inputs2ModalF','modalDisp2Outputs',...
-            'eigenfrequencies','proportionalDampingVec','inputTable','outputTable');
-        % Handle modal parameters
-        om2 = (2*pi*eigenfrequencies(:)).^2;
-        twice_zom = 2*proportionalDampingVec(:).*(2*pi*eigenfrequencies(:));
-        
-        % State-space model matrices
-        B = [zeros(size(inputs2ModalF));inputs2ModalF];
-        C = [modalDisp2Outputs,zeros(size(modalDisp2Outputs))];
-        n_m = size(inputs2ModalF,1);
-        A = [zeros(n_m),eye(n_m);...
-            -diag(om2), -diag(twice_zom)];
-        
-    % In case modal model is not available, try to load state-space model matrices    
-    catch
-        FileName = "modal_state_space_model.mat";     
-        load(fullfile(FileFolder,FileName),'A','B','C','D','inputTable','outputTable');
-        % Retrieve modal-form parameters
-        [aux,temp] = spdiags(full(A));      % Indexes to get
-        om2 = -aux(1:temp(end),1);          % Vector of squared eigenfrequencies
-        twice_zom = -aux(temp(end)+1:end,2);    % Vector of 2*damp*om
-    end
     
-    if true
-        % Remove the first 3 modes and adjusts SS model matrices
-        [aux,temp] = spdiags(full(A));
-        om2 = om2(1+3:end);
-        twice_zom = twice_zom(1+3:end);
-        nm = length(om2);
-        A = [zeros(nm),eye(nm);-diag(om2), -diag(twice_zom)];
-        B = [zeros(nm,size(B,2));B(temp(end)+1+3:end,:)];
-        C = [C(:,1+3:nm+3),zeros(size(C,1),nm)];
-    end
+    FileName = "modal_state_space_model_2ndOrder.mat";
+    load(fullfile(FileFolder,FileName),'inputs2ModalF','modalDisp2Outputs',...
+        'eigenfrequencies','inputTable','outputTable');
+    fprintf('Model from %s\n loaded.\n', fullfile(FileFolder,FileName));
     
     if(load_static_model)
         try
@@ -132,12 +104,32 @@ if(~exist('inputTable','var') || 0)
     end
 end
 
+% Handle modal parameters
+om2 = (2*pi*eigenfrequencies(:)).^2;
+twice_zom = 2*struct_damp*(2*pi*eigenfrequencies(:));
+
+% State-space model matrices
+B = [zeros(size(inputs2ModalF));inputs2ModalF];
+C = [modalDisp2Outputs,zeros(size(modalDisp2Outputs))];
+n_m = size(inputs2ModalF,1);
+A = [zeros(n_m),eye(n_m);...
+    -diag(om2), -diag(twice_zom)];
+
+if true
+    % Remove the first 3 modes and adjusts SS model matrices
+    [aux,temp] = spdiags(full(A));
+    om2 = om2(1+3:end);
+    twice_zom = twice_zom(1+3:end);
+    nm = length(om2);
+    A = [zeros(nm),eye(nm);-diag(om2), -diag(twice_zom)];
+    B = [zeros(nm,size(B,2));B(temp(end)+1+3:end,:)];
+    C = [C(:,1+3:nm+3),zeros(size(C,1),nm)];
+end
+
 om0 = sqrt(om2);
 damp = 0.5 * twice_zom./sqrt(om2);
 i_p0 = find(isnan(damp));
 if(i_p0), damp(i_p0) = damp(i_p0(end)+1)*ones(size(i_p0)); end
-        
-fprintf('Model from %s\n loaded.\n', fullfile(FileFolder,FileName));
 
 
 
@@ -204,6 +196,7 @@ end
 % Pneumatic actuator frequency response
 H1_sa = freqresp(tf(10*2*pi,[1 10*2*pi])*tf(50*2*pi,[1 50*2*pi]), w);
 SAdyn_Fr = frd(H1_sa, w, fem.Ts);
+% SAdyn_Fr = frd(freqresp(tf(1,[1/(10*2*pi) 1]), w), w, fem.Ts);
 
 % M1 linear damping
 feedin = 1:nu;
@@ -217,14 +210,17 @@ Hlag = freqresp(0.2/1 *tf([1 1*2*pi],[1 0.2*2*pi]), w);
 
 in_hp_lcD = 6+(1:6);
 in_hp_lcF = 12+(1:6);
-G0 = -m1sys{seg}.LC2CG* Hpk *res(in_hp_lcD,:)*SAdyn_Fr;
-G = -m1sys{seg}.LC2CG* Hpk *sys(in_hp_lcD,:)*SAdyn_Fr;
-G_ = -m1sys{seg}.LC2CG* res(in_hp_lcF,:)*frd(Hlag, w, fem.Ts) *SAdyn_Fr;
-G__ = -m1sys{seg}.LC2CG *Hpk *sys(in_hp_lcD,:) *frd(Hlag, w, fem.Ts) *SAdyn_Fr;
+% G0 = -m1sys{seg}.LC2CG* Hpk *res(in_hp_lcD,:)*SAdyn_Fr;
+G0 = -m1sys{seg}.LC2CG* res(in_hp_lcF,:)*SAdyn_Fr;
+% G = -m1sys{seg}.LC2CG* Hpk *sys(in_hp_lcD,:)*SAdyn_Fr;
+G0_ = -m1sys{seg}.LC2CG* res(in_hp_lcF,:)*frd(Hlag, w, fem.Ts)*SAdyn_Fr;
+G = -m1sys{seg}.LC2CG* sys(in_hp_lcF,:) *SAdyn_Fr;
+G__ = -m1sys{seg}.LC2CG *sys(in_hp_lcF,:) *frd(Hlag, w, fem.Ts) *SAdyn_Fr;
 % DEBUG TFs
 % G0 = res(1:6,:)*eye(6)*m1_act_damp;
 % G = res(1:6,:)*fb_sys;
 % G__ = sys(in_hp_lcD,:) *frd(H_, w, fem.Ts);
+
 
 %% Generalized MIMO Nyquist criteria
 %%
@@ -266,10 +262,11 @@ end
 figure(figNumber*seg)
 % Resize to report format
 % set(gcf,'Position',[900   267   304*3/2   420*0.65]);
-set(gcf,'Position',[500   267   1.5*304*3/2   420]);
+set(gcf,'Position',[500   267   1.75*304*3/2   460]);
 label_ = {'F_x','F_y','F_z','M_x','M_y','M_z'};
+t = tiledlayout('flow','TileSpacing','compact');
 for i1 = 1:6
-    subplot(2,3,i1)
+    nexttile;% subplot(2,3,i1)
     [MagG,~] = bode(G(i1,i1),w);
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)));
     hold on;
@@ -277,22 +274,22 @@ for i1 = 1:6
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)));
     [MagG,~] = bode(G__(i1,i1),w);
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)),'--');
-    [MagG,~] = bode(G_(i1,i1),w);
+    [MagG,~] = bode(G0_(i1,i1),w);
     semilogx((w/2/pi)',20*log10(reshape(MagG,Nom,1,1)),'-.');
     hold off;
     if(i1 > 3), xlabel('Frequency (Hz)','fontsize',hbode.YLabel.FontSize); end
     if(mod(i1,3) == 1), ylabel('Magnitude (dB)','fontsize',hbode.YLabel.FontSize); end
-    xlim([0.1,100]); grid on;
+    ylim([-45,25])
+    xlim([0.1,50]); grid on;
     title(label_{i1},'fontsize',hbode.YLabel.FontSize)
-    
-    if(i1==1)
-        legend('M1 damping (1800Ns/m)',...
-            'No M1 damping',...
-            'M1 damping + lag filter',...
-            'Location','southwest','fontsize',hbode.YLabel.FontSize-2);
-        legend('boxoff');
-    end
 end
+lgd=legend('lin damp',...
+    'No damp',...
+    'damp+lag filter',...
+    'No damp+lag',...
+    'NumColumns',1,'fontsize',hbode.YLabel.FontSize-2);%'Location','southwest',
+%     legend('boxoff');
+lgd.Layout.Tile = 'east';
 
 
 %%
@@ -321,8 +318,8 @@ upsample_rate = m1sys{seg}.ofl.SSdtC{1}.Ts/fem.Ts;
 m1MIMO_C_Fr = frd(upsample(m1oflmimo, upsample_rate),w);
 
 % GK = G0 * m1MIMO_C_Fr; figNumber = 1000;
-GK = G_ * m1MIMO_C_Fr; figNumber = 3000;
-% GK = G__ * m1MIMO_C_Fr; figNumber = 2000;
+GK = G0_ * m1MIMO_C_Fr; figNumber = 2000;
+% GK = G__ * m1MIMO_C_Fr; figNumber = 3000;
 
 
 % Initialize variables
@@ -489,7 +486,7 @@ plot_labels = {'F_x','F_y','F_z','M_x','M_y','M_z'};
 for ich = 1:numel(oflC_ss)
     oflC_ss{seg} = balreal(ss(fbH));
     m1sys{seg}.ofl.SSdtC{ich} = c2d(oflC_ss{seg},ofl.Ts,'foh');
-    if(true)
+    if(false)
         hbode = bodeoptions;
         hbode.FreqUnits = 'Hz';
         hbode.XLabel.FontSize = 11;
